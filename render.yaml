@@ -1,0 +1,38 @@
+services:
+  # Backend API Service (Node.js + Express)
+  - type: web
+    name: metri-backend
+    env: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: OPENAI_API_KEY
+        sync: false # Set this manually in Render dashboard
+      - key: FRONTEND_URL
+        sync: false # Set to your Netlify URL, e.g. https://metri.netlify.app
+
+# ─────────────────────────────────────────────────
+# DEPLOYMENT GUIDE
+# ─────────────────────────────────────────────────
+# 1. BACKEND (Render):
+#    - Push to GitHub, then connect repo to Render via "New → Blueprint"
+#    - In Render dashboard, set these environment variables:
+#      • OPENAI_API_KEY = sk-your-key-here
+#      • FRONTEND_URL   = https://your-app.netlify.app
+#
+# 2. FRONTEND (Netlify):
+#    - Connect same repo to Netlify
+#    - Set Base Directory: frontend
+#    - Build Command: npm run build
+#    - Publish Directory: frontend/dist
+#    - Environment Variable:
+#      • VITE_API_URL = https://metri-backend.onrender.com
+# ─────────────────────────────────────────────────

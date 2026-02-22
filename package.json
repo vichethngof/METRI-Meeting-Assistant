@@ -1,0 +1,13 @@
+{
+    "name": "metri-meeting-assistant",
+    "version": "1.0.0",
+    "description": "Full-stack Bilingual Meeting Assistant",
+    "scripts": {
+        "install-all": "cd backend && npm install && cd ../frontend && npm install",
+        "dev": "concurrently \"cd backend && npm run dev\" \"cd frontend && npm run dev\"",
+        "start": "concurrently \"cd backend && npm start\" \"cd frontend && npm run dev\""
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.2"
+    }
+}
