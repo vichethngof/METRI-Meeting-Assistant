@@ -18,6 +18,8 @@ const fs = require("fs");
 const path = require("path");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
+const helmet = require("helmet");
+const morgan = require("morgan");
 const db = require("./database");
 
 /* ─── Config ─── */
@@ -40,6 +42,11 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const app = express();
 const server = http.createServer(app);
 
+app.use(helmet({
+  contentSecurityPolicy: false, // Site has its own split CSP logic
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
+app.use(morgan("dev"));
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (server-to-server, mobile apps, curl)
@@ -132,11 +139,19 @@ app.get("/api/health", (req, res) => {
 
 app.post("/api/auth/signup", async (req, res) => {
   const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: "Username and password required" });
+  console.log(`[AUTH] Signup attempt for username: ${username}`);
+
+  if (!username || !password) {
+    console.warn("[AUTH] Signup failed: Missing username or password");
+    return res.status(400).json({ error: "Username and password required" });
+  }
 
   try {
     const existing = db.findUserByUsername(username);
-    if (existing) return res.status(400).json({ error: "Username already exists" });
+    if (existing) {
+      console.warn(`[AUTH] Signup failed: Username "${username}" already exists`);
+      return res.status(400).json({ error: "Username already exists" });
+    }
 
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash(password, salt);

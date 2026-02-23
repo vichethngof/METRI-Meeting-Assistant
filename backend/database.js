@@ -143,6 +143,7 @@ function searchTranscripts(query, userId) {
 // ── Auth Methods ─────────────────────────────
 
 function createUser(username, passwordHash) {
+  console.log(`[DB] Creating user: ${username}`);
   const id = Math.random().toString(36).substr(2, 9);
   const user = {
     id,
@@ -152,10 +153,12 @@ function createUser(username, passwordHash) {
   };
   _db.users.push(user);
   saveDB(_db);
+  console.log(`[DB] User created successfully with ID: ${id}`);
   return { id, username };
 }
 
 function findUserByUsername(username) {
+  console.log(`[DB] Looking up user: ${username}`);
   return _db.users.find(u => u.username === username) || null;
 }
 

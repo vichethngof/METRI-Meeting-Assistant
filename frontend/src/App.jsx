@@ -69,8 +69,13 @@ export default function App() {
   const [setupOS, setOS] = useState("windows");
 
   /* --- Auth State --- */
-  const [user, setUser] = useState(JSON.parse(localStorage.getItem("metri_user")));
-  const [token, setToken] = useState(localStorage.getItem("metri_token"));
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem("metri_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch { return null; }
+  });
+  const [token, setToken] = useState(() => localStorage.getItem("metri_token") || null);
   const [authMode, setAuthMode] = useState("login"); // login | signup
   const [authForm, setAuthForm] = useState({ username: "", password: "" });
 
@@ -94,10 +99,27 @@ export default function App() {
 
   /* ─── Auto-scroll ─── */
   useEffect(() => {
-    if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight;
+    if (feedRef.current) {
+      feedRef.current.scrollTop = feedRef.current.scrollHeight;
+    }
   }, [transcripts]);
 
-  /* ─── Auth Helper ─── */
+  /* ─── Toast ─── */
+  const toast$ = useCallback((msg, type = "ok") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
+
+  /* ─── Logout ─── */
+  const logout = useCallback(() => {
+    localStorage.removeItem("metri_token");
+    localStorage.removeItem("metri_user");
+    setToken(null);
+    setUser(null);
+    toast$("Logged out", "ok");
+  }, [toast$]);
+
+  /* ─── Auth Fetch Helper ─── */
   const authFetch = useCallback(async (url, options = {}) => {
     const headers = { ...options.headers, "Authorization": `Bearer ${token}` };
     const res = await fetch(url, { ...options, headers });
@@ -106,35 +128,25 @@ export default function App() {
       throw new Error("Unauthorized");
     }
     return res;
-  }, [token]);
-
-  /* ─── Toast ─── */
-
-  const toast$ = useCallback((msg, type = "ok") => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 3500);
-  }, []);
-
-  const logout = useCallback(() => {
-    localStorage.removeItem("metri_token");
-    localStorage.removeItem("metri_user");
-    setToken(null);
-    setUser(null);
-    setToast({ msg: "Logged out", type: "ok" });
-    setTimeout(() => setToast(null), 3500);
-  }, []);
+  }, [token, logout]);
 
   /* ─── Check server health on mount ─── */
   useEffect(() => {
     fetch(`${API}/health`)
       .then(r => r.json())
-      .then(d => { setServerOnline(true); setApiKeyOk(d.whisper); })
+      .then(d => {
+        setServerOnline(true);
+        setApiKeyOk(d.whisper);
+      })
       .catch(() => setServerOnline(false));
   }, []);
 
-  /* ─── Load library from server on mount ─── */
+  /* ─── Load library on mount / auth change ─── */
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      setLib([]);
+      return;
+    }
     authFetch(`${API}/sessions`)
       .then(r => r.json())
       .then(d => setLib(Array.isArray(d) ? d : []))
@@ -145,78 +157,94 @@ export default function App() {
   const handleAuth = async (e) => {
     e.preventDefault();
     try {
+      console.log(`Attempting ${authMode} at: ${API}/auth/${authMode}`);
       const res = await fetch(`${API}/auth/${authMode}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(authForm),
       });
+
       const data = await res.json();
-      if (data.token) {
+      if (res.ok && data.token) {
         localStorage.setItem("metri_token", data.token);
         localStorage.setItem("metri_user", JSON.stringify(data.user));
         setToken(data.token);
         setUser(data.user);
         toast$(`Welcome back, ${data.user.username}!`);
       } else {
-        toast$(data.error || "Authentication failed", "warn");
+        console.error("Auth failed response:", data);
+        toast$(data.error || "Authentication failed. Please check your credentials.", "warn");
       }
-    } catch {
-      toast$("Could not connect to server", "warn");
+    } catch (err) {
+      console.error("Auth connection error:", err);
+      toast$(`Connection error: Could not reach the server at ${API}. Check if the backend is running and CORS is allowed.`, "warn");
     }
   };
 
 
   /* ══ WEBSOCKET CONNECTION ══ */
-  const connectWS = useCallback(() => {
-    return new Promise((resolve, reject) => {
-      const ws = new WebSocket(WS_URL);
-      ws.binaryType = "arraybuffer";
-
-      ws.onopen = () => { wsRef.current = ws; resolve(ws); };
-      ws.onerror = () => reject(new Error("WebSocket connection failed"));
-
-      ws.onmessage = (event) => {
-        try {
-          const msg = JSON.parse(event.data);
-          handleServerMessage(msg);
-        } catch (_) { }
-      };
-
-      ws.onclose = () => {
-        if (wsRef.current === ws) wsRef.current = null;
-      };
-    });
-  }, []);
-
   const handleServerMessage = useCallback((msg) => {
     switch (msg.type) {
       case "transcript":
         if (msg.text?.trim()) {
-          const entry = { id: Date.now() + Math.random(), text: msg.text.trim(), lang: msg.lang || "en", time: msg.time || Date.now() };
+          const entry = {
+            id: Date.now() + Math.random(),
+            text: msg.text.trim(),
+            lang: msg.lang || "en",
+            time: msg.time || Date.now()
+          };
           setTx(p => [...p, entry]);
           sessionRef.current = [...sessionRef.current, entry];
         }
         setStatus("listening");
         break;
-
       case "processing":
         setStatus("processing");
         break;
-
       case "silence":
         setStatus("listening");
         break;
-
       case "error":
         console.error("Server error:", msg.message);
-        setStatus("listening"); // keep going
+        setStatus("listening");
         toast$(msg.message || "Transcription error", "warn");
         break;
-
       default:
         break;
     }
   }, [toast$]);
+
+  const connectWS = useCallback(() => {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(WS_URL);
+      ws.binaryType = "arraybuffer";
+
+      ws.onopen = () => {
+        wsRef.current = ws;
+        console.log("[WS] Connected to", WS_URL);
+        resolve(ws);
+      };
+
+      ws.onerror = (err) => {
+        console.error("[WS] Connection error:", err);
+        reject(new Error("WebSocket connection failed"));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          handleServerMessage(msg);
+        } catch (e) {
+          console.error("[WS] Message parse error:", e);
+        }
+      };
+
+      ws.onclose = (e) => {
+        console.log("[WS] Closed:", e.code, e.reason);
+        if (wsRef.current === ws) wsRef.current = null;
+      };
+    });
+  }, [handleServerMessage]);
 
   /* ══ MIC SETUP ══ */
   const setupMic = useCallback(async () => {
@@ -580,6 +608,20 @@ export default function App() {
                 <div style={{ fontSize: 26, fontWeight: 900, marginBottom: 8, letterSpacing: "-.02em" }}>METRI</div>
                 <div style={{ fontSize: 14, color: "#64748b" }}>{authMode === "login" ? "Sign in to your assistant" : "Create your free account"}</div>
               </div>
+
+              {/* Server offline warning (on Auth screen) */}
+              {serverOnline === false && (
+                <div style={{ background: "#fef2f2", border: "1.5px solid #fecaca", borderRadius: 12, padding: "12px 15px", marginBottom: 25, animation: "up .3s" }}>
+                  <div style={{ fontWeight: 700, color: "#ef4444", marginBottom: 4, fontSize: 12 }}>⚠️ Backend Not Connected</div>
+                  <div style={{ fontSize: 11, color: "#7f1d1d", lineHeight: 1.5 }}>
+                    {window.location.hostname === "localhost" ? (
+                      <>Start backend locally:<br /><code style={{ background: "#fee2e2", padding: "2px 4px", borderRadius: 4 }}>cd backend && npm start</code></>
+                    ) : (
+                      <>Cannot reach backend. Make sure <strong>VITE_API_URL</strong> is set in Netlify settings and pointing to your Render URL.</>
+                    )}
+                  </div>
+                </div>
+              )}
 
               <form onSubmit={handleAuth} style={{ display: "flex", flexDirection: "column", gap: 15 }}>
                 <div>
