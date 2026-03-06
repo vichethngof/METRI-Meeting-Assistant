@@ -25,7 +25,6 @@ services:
   # 2. Frontend Static Site (React + Vite)
   - type: static_site
     name: metri-frontend
-    env: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     publishDir: dist
